@@ -51,7 +51,13 @@ app.get('/api/sc-news', async (req, res) => {
   try {
     const { data: xml } = await axios.get(
       'https://sc.judiciary.gov.ph/feed/',
-      { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } }
+      {
+        timeout: 20000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+        },
+      }
     );
     const $ = cheerio.load(xml, { xmlMode: true });
     const articles = [];
@@ -60,7 +66,9 @@ app.get('/api/sc-news', async (req, res) => {
       if (articles.length >= 6) return false;
       const $el      = $(el);
       const title    = $el.find('title').first().text().trim();
-      const link     = $el.find('link').first().text().trim() || $el.find('guid').first().text().trim();
+      const rawLink  = $el.find('link').first().text().trim();
+      const guid     = $el.find('guid').first().text().trim();
+      const link     = rawLink || guid || '';
       const pubDate  = $el.find('pubDate').first().text().trim();
       const rawDesc  = $el.find('description').first().text().trim();
       const excerpt  = cheerio.load(rawDesc).text().replace(/\s+/g, ' ').trim().slice(0, 200);
@@ -85,8 +93,12 @@ app.get('/api/sc-news', async (req, res) => {
     }
     res.json({ success: true, data: articles });
   } catch (e) {
-    console.error('SC news feed error:', e.message);
-    res.status(500).json({ success: false, message: 'Could not fetch SC news' });
+    console.error('SC news feed error:', e.code || e.message, e.response?.status);
+    res.status(502).json({
+      success: false,
+      message: 'Could not fetch SC news',
+      error:   e.code || e.message,
+    });
   }
 });
 
