@@ -106,35 +106,35 @@ app.get('/api/posts', async (req, res) => {
   }
 });
 
-// ── SC Judiciary news scraper ─────────────────────────────────────────────────
+// ── SC Judiciary RSS feed ─────────────────────────────────────────────────────
 app.get('/api/sc-news', async (req, res) => {
   try {
-    const { data: html } = await axios.get(
-      'https://sc.judiciary.gov.ph/news-and-announcements/',
+    const { data: xml } = await axios.get(
+      'https://sc.judiciary.gov.ph/feed/',
       { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } }
     );
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(xml, { xmlMode: true });
     const articles = [];
 
-    $('article, .post, .entry, .news-item, .td-module-container').each((i, el) => {
+    $('item').each((i, el) => {
       if (articles.length >= 6) return false;
-      const $el = $(el);
-      const title   = $el.find('h1, h2, h3, h4, .entry-title, .td-module-title').first().text().trim();
-      const link    = $el.find('a[href]').first().attr('href') || '';
-      const date    = $el.find('time, .date, .entry-date, .td-post-date').first().text().trim();
-      const excerpt = $el.find('p, .excerpt, .entry-summary, .td-excerpt').first().text().trim().slice(0, 200);
-      const imgSrc  = $el.find('img').first().attr('src') || $el.find('img').first().attr('data-src') || '';
-      const image   = imgSrc || 'https://images.unsplash.com/photo-1589578527966-fdac0f44566c?w=600&q=80&fit=crop&crop=center';
+      const $el      = $(el);
+      const title    = $el.find('title').first().text().trim();
+      const link     = $el.find('link').first().text().trim() || $el.find('guid').first().text().trim();
+      const pubDate  = $el.find('pubDate').first().text().trim();
+      const rawDesc  = $el.find('description').first().text().trim();
+      const excerpt  = cheerio.load(rawDesc).text().replace(/\s+/g, ' ').trim().slice(0, 200);
+      const category = $el.find('category').first().text().trim() || 'SC Judiciary';
 
       if (title) {
         articles.push({
           id:       i + 1,
           title,
-          link:     link.startsWith('http') ? link : `https://sc.judiciary.gov.ph${link}`,
-          date,
+          link,
+          date:     pubDate,
           excerpt,
-          image,
-          category: 'SC Judiciary',
+          image:    'https://images.unsplash.com/photo-1589578527966-fdac0f44566c?w=600&q=80&fit=crop&crop=center',
+          category,
           source:   'sc.judiciary.gov.ph',
         });
       }
@@ -145,7 +145,7 @@ app.get('/api/sc-news', async (req, res) => {
     }
     res.json({ success: true, data: articles });
   } catch (e) {
-    console.error('SC news scrape error:', e.message);
+    console.error('SC news feed error:', e.message);
     res.status(500).json({ success: false, message: 'Could not fetch SC news' });
   }
 });
