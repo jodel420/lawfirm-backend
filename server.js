@@ -94,30 +94,6 @@ let attorneys = [
   },
 ];
 
-let testimonials = [
-  {
-    id: 1,
-    name: 'Brandon Artiss',
-    role: 'Business Owner',
-    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200&q=80&fit=crop&crop=faces,center',
-    text: "Aniceta handled my corporate dispute with exceptional skill and professionalism. Their strategic approach and clear communication made a stressful situation manageable. I couldn't have asked for better representation.",
-  },
-  {
-    id: 2,
-    name: 'Sarah Mitchell',
-    role: 'Marketing Director',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=200&q=80&fit=crop&crop=faces,center',
-    text: 'The attorneys at Aniceta went above and beyond for my family law case. They were compassionate, thorough, and always kept my best interests at heart. I highly recommend them to anyone seeking legal counsel.',
-  },
-  {
-    id: 3,
-    name: 'James Ortega',
-    role: 'Real Estate Investor',
-    avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=200&q=80&fit=crop&crop=faces,center',
-    text: 'Outstanding legal support for my property transactions. The team was knowledgeable, responsive, and incredibly detail-oriented. Aniceta is my go-to firm for all real estate legal matters.',
-  },
-];
-
 let practiceAreas = [
   { id: 1, icon: 'FaBalanceScale', title: 'Family Law', desc: 'Divorce, custody, adoption, and domestic relations handled with compassion and expertise.' },
   { id: 2, icon: 'FaBuilding', title: 'Corporate Law', desc: 'Business formation, contracts, mergers, and compliance solutions for your company.' },
@@ -167,7 +143,7 @@ let posts = [
   },
 ];
 
-let nextId = { attorneys: 5, testimonials: 4, practiceAreas: 7, posts: 4 };
+let nextId = { attorneys: 5, practiceAreas: 7, posts: 4 };
 
 // ─── Admin auth middleware ─────────────────────────────────────────────
 function requireAdmin(req, res, next) {
@@ -227,33 +203,6 @@ app.put('/api/admin/attorneys/:id', requireAdmin, (req, res) => {
 app.delete('/api/admin/attorneys/:id', requireAdmin, (req, res) => {
   const id = parseInt(req.params.id);
   attorneys = attorneys.filter(a => a.id !== id);
-  res.json({ success: true });
-});
-
-// ─── Admin: Testimonials CRUD ─────────────────────────────────────────
-app.get('/api/admin/testimonials', requireAdmin, (req, res) => {
-  res.json({ success: true, data: testimonials });
-});
-
-app.post('/api/admin/testimonials', requireAdmin, (req, res) => {
-  const { name, role, avatar, text } = req.body;
-  if (!name || !text) return res.status(400).json({ success: false, message: 'Name and text are required' });
-  const item = { id: nextId.testimonials++, name, role: role || '', avatar: avatar || '', text };
-  testimonials.push(item);
-  res.json({ success: true, data: item });
-});
-
-app.put('/api/admin/testimonials/:id', requireAdmin, (req, res) => {
-  const id = parseInt(req.params.id);
-  const idx = testimonials.findIndex(t => t.id === id);
-  if (idx === -1) return res.status(404).json({ success: false, message: 'Not found' });
-  testimonials[idx] = { ...testimonials[idx], ...req.body, id };
-  res.json({ success: true, data: testimonials[idx] });
-});
-
-app.delete('/api/admin/testimonials/:id', requireAdmin, (req, res) => {
-  const id = parseInt(req.params.id);
-  testimonials = testimonials.filter(t => t.id !== id);
   res.json({ success: true });
 });
 
@@ -324,10 +273,6 @@ app.delete('/api/admin/posts/:id', requireAdmin, (req, res) => {
 // ─── Public API endpoints ─────────────────────────────────────────────
 app.get('/api/attorneys', (req, res) => {
   res.json({ success: true, data: attorneys });
-});
-
-app.get('/api/testimonials', (req, res) => {
-  res.json({ success: true, data: testimonials });
 });
 
 app.get('/api/practice-areas', (req, res) => {

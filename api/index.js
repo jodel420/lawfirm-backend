@@ -6,13 +6,13 @@ const jwt        = require('jsonwebtoken');
 const bcrypt     = require('bcryptjs');
 const cloudinary = require('cloudinary').v2;
 const multer     = require('multer');
+const nodemailer = require('nodemailer');
 const axios      = require('axios');
 const cheerio    = require('cheerio');
 
 const dbConnect    = require('../lib/db');
 const requireAuth  = require('../lib/auth');
 const Attorney     = require('../models/Attorney');
-const Testimonial  = require('../models/Testimonial');
 const PracticeArea = require('../models/PracticeArea');
 const About        = require('../models/About');
 const Post         = require('../models/Post');
@@ -102,6 +102,93 @@ app.get('/api/sc-news', async (req, res) => {
   }
 });
 
+// ── Nodemailer transporter ────────────────────────────────────────────────────
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+// ── Contact form (email only — no DB) ────────────────────────────────────────
+app.post('/api/contact', async (req, res) => {
+  const { firstName, lastName, email, preferredLawyer, notes } = req.body;
+
+  if (!firstName || !email) {
+    return res.status(400).json({ success: false, message: 'First name and email are required.' });
+  }
+
+  try {
+    // Notify the firm
+    await transporter.sendMail({
+      from: `"Aniceta Website" <${process.env.EMAIL_USER}>`,
+      to: process.env.NOTIFY_EMAIL,
+      subject: `New Consultation Request — ${firstName} ${lastName || ''}`.trim(),
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
+          <div style="background:#1a2638;padding:24px 28px;">
+            <h2 style="color:#c9a84c;margin:0;font-size:18px;letter-spacing:1px;">ANICETA</h2>
+            <p style="color:rgba(255,255,255,0.6);margin:4px 0 0;font-size:12px;">New Consultation Request</p>
+          </div>
+          <div style="padding:28px;">
+            <table style="width:100%;border-collapse:collapse;font-size:14px;">
+              <tr><td style="padding:8px 0;color:#6b7280;width:140px;">Name</td><td style="padding:8px 0;color:#1a2638;font-weight:600;">${firstName} ${lastName || ''}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;">Email</td><td style="padding:8px 0;color:#1a2638;"><a href="mailto:${email}" style="color:#c9a84c;">${email}</a></td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;">Preferred Lawyer</td><td style="padding:8px 0;color:#1a2638;">${preferredLawyer || 'Not specified'}</td></tr>
+              ${notes ? `<tr><td style="padding:8px 0;color:#6b7280;vertical-align:top;">Concern / Notes</td><td style="padding:8px 0;color:#1a2638;white-space:pre-wrap;">${notes}</td></tr>` : ''}
+            </table>
+          </div>
+          <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
+            Submitted from anicetalawfirm.vercel.app — ${new Date().toLocaleString()}
+          </div>
+        </div>
+      `,
+    });
+
+    // Confirmation to the client
+    await transporter.sendMail({
+      from: `"Aniceta Law Firm" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'We received your consultation request — Aniceta',
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
+          <div style="background:#1a2638;padding:24px 28px;">
+            <h2 style="color:#c9a84c;margin:0;font-size:18px;letter-spacing:1px;">ANICETA</h2>
+            <p style="color:rgba(255,255,255,0.6);margin:4px 0 0;font-size:12px;">Law Firm</p>
+          </div>
+          <div style="padding:28px;">
+            <p style="color:#1a2638;font-size:15px;">Dear ${firstName},</p>
+            <p style="color:#6b7280;font-size:14px;line-height:1.7;">
+              Thank you for reaching out to Aniceta. We have received your consultation request
+              and one of our attorneys will contact you within <strong style="color:#1a2638;">24 hours</strong>.
+            </p>
+            <div style="margin:28px 0;padding:20px;background:#f5f2ed;border-left:3px solid #c9a84c;">
+              <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">Preferred lawyer: <strong style="color:#1a2638;">${preferredLawyer || 'Not specified'}</strong></p>
+              ${notes ? `<p style="margin:8px 0 0;font-size:13px;color:#6b7280;">Your concern:<br/><strong style="color:#1a2638;white-space:pre-wrap;">${notes}</strong></p>` : ''}
+            </div>
+            <p style="color:#6b7280;font-size:14px;">Warm regards,<br/><strong style="color:#1a2638;">The Aniceta Team</strong></p>
+          </div>
+          <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
+            © ${new Date().getFullYear()} Aniceta Law Firm. All rights reserved.
+          </div>
+        </div>
+      `,
+    });
+
+    res.json({
+      success: true,
+      message: `Thank you, ${firstName}! We've received your request and will contact you within 24 hours. Please check your email for a confirmation.`,
+    });
+  } catch (err) {
+    console.error('Contact email error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: 'Your request was received but we could not send a confirmation email. We will still contact you.',
+    });
+  }
+});
+
 // Connect DB before every request (cached after first call)
 app.use(async (req, res, next) => {
   try {
@@ -120,15 +207,6 @@ app.use(async (req, res, next) => {
 app.get('/api/attorneys', async (req, res) => {
   try {
     const data = await Attorney.find().sort({ createdAt: 1 });
-    res.json({ success: true, data });
-  } catch (e) {
-    res.status(500).json({ success: false, message: e.message });
-  }
-});
-
-app.get('/api/testimonials', async (req, res) => {
-  try {
-    const data = await Testimonial.find().sort({ createdAt: 1 });
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -255,39 +333,6 @@ app.put('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
 
 app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
   await Attorney.findByIdAndDelete(req.params.id);
-  res.json({ success: true });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  ADMIN: TESTIMONIALS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-app.get('/api/admin/testimonials', requireAuth, async (req, res) => {
-  const data = await Testimonial.find().sort({ createdAt: 1 });
-  res.json({ success: true, data });
-});
-
-app.post('/api/admin/testimonials', requireAuth, async (req, res) => {
-  try {
-    const doc = await Testimonial.create(req.body);
-    res.json({ success: true, data: doc });
-  } catch (e) {
-    res.status(400).json({ success: false, message: e.message });
-  }
-});
-
-app.put('/api/admin/testimonials/:id', requireAuth, async (req, res) => {
-  try {
-    const doc = await Testimonial.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data: doc });
-  } catch (e) {
-    res.status(400).json({ success: false, message: e.message });
-  }
-});
-
-app.delete('/api/admin/testimonials/:id', requireAuth, async (req, res) => {
-  await Testimonial.findByIdAndDelete(req.params.id);
   res.json({ success: true });
 });
 

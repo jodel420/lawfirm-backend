@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "Aniceta Law Firm – Express/MongoDB API",
   "main": "api/index.js",
-  "engines": { "node": "20.x" },
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "node --watch api/index.js",
     "start": "node api/index.js"
@@ -18,6 +20,7 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.9.5",
-    "multer": "^1.4.5-lts.1"
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^8.0.5"
   }
 }

@@ -1,0 +1,5 @@
+---
+alwaysApply: true
+---
+
+Do not ever, under any circumstance, issue git commands of any kind. If you think you need to use git, ask first and I will execute it manually.
