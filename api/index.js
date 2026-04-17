@@ -198,11 +198,10 @@ app.post('/api/contact', async (req, res) => {
       message: `Thank you, ${firstName}! We've received your request and will contact you within 24 hours. Please check your email for a confirmation.`,
     });
   } catch (err) {
-    console.error('Contact email error:', err.message, '| code:', err.code, '| responseCode:', err.responseCode, '| command:', err.command);
+    console.error('Contact email error:', err.message, '| code:', err.code, '| responseCode:', err.responseCode);
     res.status(500).json({
       success: false,
       message: 'Your request was received but we could not send a confirmation email. We will still contact you.',
-      debug: { error: err.message, code: err.code, responseCode: err.responseCode },
     });
   }
 });
