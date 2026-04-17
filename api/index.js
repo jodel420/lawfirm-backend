@@ -102,16 +102,31 @@ app.get('/api/sc-news', async (req, res) => {
   }
 });
 
-// ── Nodemailer transporter ────────────────────────────────────────────────────
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+// ── Health check (no DB required) ────────────────────────────────────────────
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    version: '2.1',
+    env: {
+      EMAIL_USER: !!process.env.EMAIL_USER,
+      EMAIL_PASS: !!process.env.EMAIL_PASS,
+      NOTIFY_EMAIL: !!process.env.NOTIFY_EMAIL,
+      MONGO_URI: !!process.env.MONGO_URI,
+      CORS_ORIGIN: process.env.CORS_ORIGIN || '(not set)',
+    },
+  });
 });
 
 // ── Contact form (email only — no DB) ────────────────────────────────────────
+function getTransporter() {
+  const user = (process.env.EMAIL_USER || '').trim();
+  const pass = (process.env.EMAIL_PASS || '').trim();
+  if (!user || !pass) {
+    throw new Error(`Email credentials missing – EMAIL_USER=${user ? 'set' : 'EMPTY'}, EMAIL_PASS=${pass ? 'set' : 'EMPTY'}`);
+  }
+  return nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+}
+
 app.post('/api/contact', async (req, res) => {
   const { firstName, lastName, email, preferredLawyer, notes } = req.body;
 
@@ -120,10 +135,12 @@ app.post('/api/contact', async (req, res) => {
   }
 
   try {
-    // Notify the firm
+    const transporter = getTransporter();
+    const fromUser = (process.env.EMAIL_USER || '').trim();
+
     await transporter.sendMail({
-      from: `"Aniceta Website" <${process.env.EMAIL_USER}>`,
-      to: process.env.NOTIFY_EMAIL,
+      from: `"Aniceta Website" <${fromUser}>`,
+      to: (process.env.NOTIFY_EMAIL || fromUser).trim(),
       subject: `New Consultation Request — ${firstName} ${lastName || ''}`.trim(),
       html: `
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
@@ -148,7 +165,7 @@ app.post('/api/contact', async (req, res) => {
 
     // Confirmation to the client
     await transporter.sendMail({
-      from: `"Aniceta Law Firm" <${process.env.EMAIL_USER}>`,
+      from: `"Aniceta Law Firm" <${fromUser}>`,
       to: email,
       subject: 'We received your consultation request — Aniceta',
       html: `
@@ -181,10 +198,11 @@ app.post('/api/contact', async (req, res) => {
       message: `Thank you, ${firstName}! We've received your request and will contact you within 24 hours. Please check your email for a confirmation.`,
     });
   } catch (err) {
-    console.error('Contact email error:', err.message);
+    console.error('Contact email error:', err.message, '| code:', err.code, '| responseCode:', err.responseCode, '| command:', err.command);
     res.status(500).json({
       success: false,
       message: 'Your request was received but we could not send a confirmation email. We will still contact you.',
+      debug: { error: err.message, code: err.code, responseCode: err.responseCode },
     });
   }
 });
