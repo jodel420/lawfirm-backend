@@ -91,3 +91,21 @@ create policy "Allow all for service role" on practice_areas for all using (true
 create policy "Allow all for service role" on about          for all using (true) with check (true);
 create policy "Allow all for service role" on posts          for all using (true) with check (true);
 create policy "Allow all for service role" on newsletters    for all using (true) with check (true);
+
+-- ── Storage: Create public "images" bucket ──────────────────────────────────
+-- NOTE: Run this SEPARATELY in the SQL Editor after the tables above.
+insert into storage.buckets (id, name, public)
+values ('images', 'images', true)
+on conflict (id) do nothing;
+
+-- Allow public reads on the images bucket
+create policy "Public read access" on storage.objects
+  for select using (bucket_id = 'images');
+
+-- Allow authenticated uploads via service_role key
+create policy "Service role upload" on storage.objects
+  for insert with check (bucket_id = 'images');
+
+-- Allow service_role to delete images
+create policy "Service role delete" on storage.objects
+  for delete using (bucket_id = 'images');

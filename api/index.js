@@ -4,21 +4,16 @@ const express    = require('express');
 const cors       = require('cors');
 const jwt        = require('jsonwebtoken');
 const bcrypt     = require('bcryptjs');
-const cloudinary = require('cloudinary').v2;
 const multer     = require('multer');
 const nodemailer = require('nodemailer');
 const axios      = require('axios');
 const cheerio    = require('cheerio');
+const crypto     = require('crypto');
 
 const supabase   = require('../lib/db');
 const requireAuth = require('../lib/auth');
 
-// ── Cloudinary ────────────────────────────────────────────────────────────────
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key:    process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+const STORAGE_BUCKET = 'images';
 
 // ── Multer (memory storage – no disk writes) ──────────────────────────────────
 const upload = multer({
@@ -323,21 +318,32 @@ app.post('/api/admin/logout', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ADMIN: IMAGE UPLOAD (Cloudinary)
+//  ADMIN: IMAGE UPLOAD (Supabase Storage)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.post('/api/admin/upload', requireAuth, upload.single('image'), async (req, res) => {
   if (!req.file) return res.status(400).json({ success: false, message: 'No file provided' });
   try {
-    const result = await new Promise((resolve, reject) => {
-      cloudinary.uploader.upload_stream(
-        { folder: 'aniceta-law-firm', resource_type: 'image' },
-        (err, r) => (err ? reject(err) : resolve(r))
-      ).end(req.file.buffer);
-    });
-    res.json({ success: true, url: result.secure_url });
+    const ext = req.file.originalname.split('.').pop() || 'jpg';
+    const fileName = `${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    const filePath = `uploads/${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .upload(filePath, req.file.buffer, {
+        contentType: req.file.mimetype,
+        upsert: false,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(STORAGE_BUCKET)
+      .getPublicUrl(filePath);
+
+    res.json({ success: true, url: publicUrl });
   } catch (e) {
-    console.error('Cloudinary upload error:', e.message);
+    console.error('Image upload error:', e.message);
     res.status(500).json({ success: false, message: 'Image upload failed' });
   }
 });
