@@ -1,7 +1,7 @@
 {
   "name": "law-firm-backend",
   "version": "1.0.0",
-  "description": "Aniceta Law Firm – Express/MongoDB API",
+  "description": "Aniceta Law Firm – Express/Supabase API",
   "main": "api/index.js",
   "engines": {
     "node": "20.x"
@@ -11,6 +11,7 @@
     "start": "node api/index.js"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.103.3",
     "axios": "^1.7.9",
     "bcryptjs": "^2.4.3",
     "cheerio": "^1.0.0",
@@ -19,7 +20,6 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.5",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^8.0.5"
   }

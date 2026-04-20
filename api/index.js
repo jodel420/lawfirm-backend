@@ -10,13 +10,8 @@ const nodemailer = require('nodemailer');
 const axios      = require('axios');
 const cheerio    = require('cheerio');
 
-const dbConnect    = require('../lib/db');
-const requireAuth  = require('../lib/auth');
-const Attorney     = require('../models/Attorney');
-const PracticeArea = require('../models/PracticeArea');
-const About        = require('../models/About');
-const Post         = require('../models/Post');
-const Newsletter   = require('../models/Newsletter');
+const supabase   = require('../lib/db');
+const requireAuth = require('../lib/auth');
 
 // ── Cloudinary ────────────────────────────────────────────────────────────────
 cloudinary.config({
@@ -117,12 +112,12 @@ app.get('/api/sc-news', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
-    version: '2.1',
+    version: '3.0',
     env: {
       EMAIL_USER: !!process.env.EMAIL_USER,
       EMAIL_PASS: !!process.env.EMAIL_PASS,
       NOTIFY_EMAIL: !!process.env.NOTIFY_EMAIL,
-      MONGO_URI: !!process.env.MONGO_URI,
+      SUPABASE_URL: !!process.env.SUPABASE_URL,
       CORS_ORIGIN: process.env.CORS_ORIGIN || '(not set)',
     },
   });
@@ -217,24 +212,17 @@ app.post('/api/contact', async (req, res) => {
   }
 });
 
-// Connect DB before every request (cached after first call)
-app.use(async (req, res, next) => {
-  try {
-    await dbConnect();
-    next();
-  } catch (err) {
-    console.error('DB connection error:', err.message);
-    res.status(503).json({ success: false, message: 'Database unavailable' });
-  }
-});
-
 // ═══════════════════════════════════════════════════════════════════════════════
 //  PUBLIC ROUTES
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.get('/api/attorneys', async (req, res) => {
   try {
-    const data = await Attorney.find().sort({ createdAt: 1 });
+    const { data, error } = await supabase
+      .from('attorneys')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -243,7 +231,11 @@ app.get('/api/attorneys', async (req, res) => {
 
 app.get('/api/practice-areas', async (req, res) => {
   try {
-    const data = await PracticeArea.find().sort({ createdAt: 1 });
+    const { data, error } = await supabase
+      .from('practice_areas')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -252,7 +244,12 @@ app.get('/api/practice-areas', async (req, res) => {
 
 app.get('/api/about', async (req, res) => {
   try {
-    const data = await About.findOne();
+    const { data, error } = await supabase
+      .from('about')
+      .select('*')
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
     res.json({ success: true, data: data || DEFAULT_ABOUT });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -261,7 +258,11 @@ app.get('/api/about', async (req, res) => {
 
 app.get('/api/posts', async (req, res) => {
   try {
-    const data = await Post.find().sort({ createdAt: -1 });
+    const { data, error } = await supabase
+      .from('posts')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -273,9 +274,19 @@ app.post('/api/newsletter', async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ success: false, message: 'Email is required' });
   try {
-    const exists = await Newsletter.findOne({ email });
-    if (exists) return res.json({ success: true, message: "You're already subscribed!" });
-    await Newsletter.create({ email });
+    const { data: existing } = await supabase
+      .from('newsletters')
+      .select('id')
+      .eq('email', email.toLowerCase().trim())
+      .maybeSingle();
+
+    if (existing) return res.json({ success: true, message: "You're already subscribed!" });
+
+    const { error } = await supabase
+      .from('newsletters')
+      .insert({ email: email.toLowerCase().trim() });
+    if (error) throw error;
+
     res.json({ success: true, message: 'Thank you for subscribing!' });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -336,14 +347,23 @@ app.post('/api/admin/upload', requireAuth, upload.single('image'), async (req, r
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.get('/api/admin/attorneys', requireAuth, async (req, res) => {
-  const data = await Attorney.find().sort({ createdAt: 1 });
+  const { data, error } = await supabase
+    .from('attorneys')
+    .select('*')
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, data });
 });
 
 app.post('/api/admin/attorneys', requireAuth, async (req, res) => {
   try {
-    const doc = await Attorney.create(req.body);
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('attorneys')
+      .insert(req.body)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -351,16 +371,26 @@ app.post('/api/admin/attorneys', requireAuth, async (req, res) => {
 
 app.put('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
   try {
-    const doc = await Attorney.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('attorneys')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
 });
 
 app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
-  await Attorney.findByIdAndDelete(req.params.id);
+  const { error } = await supabase
+    .from('attorneys')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true });
 });
 
@@ -369,14 +399,23 @@ app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.get('/api/admin/practice-areas', requireAuth, async (req, res) => {
-  const data = await PracticeArea.find().sort({ createdAt: 1 });
+  const { data, error } = await supabase
+    .from('practice_areas')
+    .select('*')
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, data });
 });
 
 app.post('/api/admin/practice-areas', requireAuth, async (req, res) => {
   try {
-    const doc = await PracticeArea.create(req.body);
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('practice_areas')
+      .insert(req.body)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -384,16 +423,26 @@ app.post('/api/admin/practice-areas', requireAuth, async (req, res) => {
 
 app.put('/api/admin/practice-areas/:id', requireAuth, async (req, res) => {
   try {
-    const doc = await PracticeArea.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('practice_areas')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
 });
 
 app.delete('/api/admin/practice-areas/:id', requireAuth, async (req, res) => {
-  await PracticeArea.findByIdAndDelete(req.params.id);
+  const { error } = await supabase
+    .from('practice_areas')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true });
 });
 
@@ -402,14 +451,40 @@ app.delete('/api/admin/practice-areas/:id', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.get('/api/admin/about', requireAuth, async (req, res) => {
-  const data = await About.findOne();
+  const { data, error } = await supabase
+    .from('about')
+    .select('*')
+    .limit(1)
+    .maybeSingle();
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, data: data || DEFAULT_ABOUT });
 });
 
 app.put('/api/admin/about', requireAuth, async (req, res) => {
   try {
-    const doc = await About.findOneAndUpdate({}, req.body, { new: true, upsert: true, runValidators: true });
-    res.json({ success: true, data: doc });
+    const { data: existing } = await supabase
+      .from('about')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    let data, error;
+    if (existing) {
+      ({ data, error } = await supabase
+        .from('about')
+        .update(req.body)
+        .eq('id', existing.id)
+        .select()
+        .single());
+    } else {
+      ({ data, error } = await supabase
+        .from('about')
+        .insert(req.body)
+        .select()
+        .single());
+    }
+    if (error) throw error;
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -420,14 +495,23 @@ app.put('/api/admin/about', requireAuth, async (req, res) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.get('/api/admin/posts', requireAuth, async (req, res) => {
-  const data = await Post.find().sort({ createdAt: -1 });
+  const { data, error } = await supabase
+    .from('posts')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, data });
 });
 
 app.post('/api/admin/posts', requireAuth, async (req, res) => {
   try {
-    const doc = await Post.create(req.body);
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('posts')
+      .insert(req.body)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -435,16 +519,26 @@ app.post('/api/admin/posts', requireAuth, async (req, res) => {
 
 app.put('/api/admin/posts/:id', requireAuth, async (req, res) => {
   try {
-    const doc = await Post.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
-    if (!doc) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data: doc });
+    const { data, error } = await supabase
+      .from('posts')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
 });
 
 app.delete('/api/admin/posts/:id', requireAuth, async (req, res) => {
-  await Post.findByIdAndDelete(req.params.id);
+  const { error } = await supabase
+    .from('posts')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true });
 });
 
