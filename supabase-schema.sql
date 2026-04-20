@@ -147,6 +147,23 @@ create policy "Allow all for service role" on admins          for all using (tru
 create policy "Allow all for service role" on lawyer_accounts for all using (true) with check (true);
 create policy "Allow all for service role" on lawyer_notes    for all using (true) with check (true);
 
+-- 9. Settings (key-value store for admin configuration)
+create table if not exists settings (
+  id         uuid primary key default gen_random_uuid(),
+  key        text not null unique,
+  value      text not null default '',
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+create or replace trigger settings_updated_at
+  before update on settings for each row execute function update_updated_at();
+
+alter table settings enable row level security;
+create policy "Allow all for service role" on settings for all using (true) with check (true);
+
+insert into settings (key, value) values ('token_expiry', '7d') on conflict (key) do nothing;
+
 -- ── Storage: Create public "images" bucket ──────────────────────────────────
 insert into storage.buckets (id, name, public)
 values ('images', 'images', true)

@@ -299,6 +299,8 @@ app.post('/api/admin/login', async (req, res) => {
   }
 
   try {
+    const expiry = await getSetting('token_expiry', '7d');
+
     const { data: admin, error } = await supabase
       .from('admins')
       .select('*')
@@ -307,14 +309,13 @@ app.post('/api/admin/login', async (req, res) => {
       .maybeSingle();
 
     if (error && error.message.includes('admins')) {
-      // admins table doesn't exist yet — fall back to default credentials
       const defaultUser = process.env.ADMIN_USERNAME || 'admin';
       const defaultPass = process.env.ADMIN_PASSWORD || 'admin123';
       if (username === defaultUser && password === defaultPass) {
         const token = jwt.sign(
           { id: 'default', username: defaultUser, role: 'super_admin', type: 'admin' },
           process.env.JWT_SECRET || 'dev-secret',
-          { expiresIn: '7d' }
+          { expiresIn: expiry }
         );
         return res.json({ success: true, token, user: { id: 'default', username: defaultUser, full_name: 'Admin', role: 'super_admin' } });
       }
@@ -332,7 +333,7 @@ app.post('/api/admin/login', async (req, res) => {
     const token = jwt.sign(
       { id: admin.id, username: admin.username, role: admin.role, type: 'admin' },
       process.env.JWT_SECRET || 'dev-secret',
-      { expiresIn: '7d' }
+      { expiresIn: expiry }
     );
     res.json({ success: true, token, user: { id: admin.id, username: admin.username, full_name: admin.full_name, role: admin.role } });
   } catch (e) {
@@ -343,6 +344,50 @@ app.post('/api/admin/login', async (req, res) => {
 
 app.post('/api/admin/logout', (req, res) => {
   res.json({ success: true });
+});
+
+// ── Admin: Settings ───────────────────────────────────────────────────────────
+
+async function getSetting(key, fallback) {
+  try {
+    const { data } = await supabase.from('settings').select('value').eq('key', key).maybeSingle();
+    return data?.value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+app.get('/api/admin/settings', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase.from('settings').select('*');
+    if (error && error.message.includes('settings')) {
+      return res.json({ success: true, data: { token_expiry: '7d' } });
+    }
+    if (error) throw error;
+    const settings = {};
+    (data || []).forEach(r => { settings[r.key] = r.value; });
+    if (!settings.token_expiry) settings.token_expiry = '7d';
+    res.json({ success: true, data: settings });
+  } catch (e) {
+    res.json({ success: true, data: { token_expiry: '7d' } });
+  }
+});
+
+app.put('/api/admin/settings', requireAuth, async (req, res) => {
+  try {
+    const entries = Object.entries(req.body);
+    for (const [key, value] of entries) {
+      const { data: existing } = await supabase.from('settings').select('id').eq('key', key).maybeSingle();
+      if (existing) {
+        await supabase.from('settings').update({ value }).eq('key', key);
+      } else {
+        await supabase.from('settings').insert({ key, value });
+      }
+    }
+    res.json({ success: true });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
 });
 
 // ── Admin: Manage admin accounts ──────────────────────────────────────────────
@@ -427,10 +472,11 @@ app.post('/api/lawyer/login', async (req, res) => {
 
     await supabase.from('lawyer_accounts').update({ last_login: new Date().toISOString() }).eq('id', account.id);
 
+    const lawyerExpiry = await getSetting('token_expiry', '7d');
     const token = jwt.sign(
       { id: account.id, attorney_id: account.attorney_id, email: account.email, type: 'lawyer' },
       process.env.JWT_SECRET || 'dev-secret',
-      { expiresIn: '7d' }
+      { expiresIn: lawyerExpiry }
     );
     res.json({
       success: true,
