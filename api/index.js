@@ -37,8 +37,19 @@ const upload = multer({
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
 
+const allowedOrigins = (process.env.CORS_ORIGIN || '*')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin:         (process.env.CORS_ORIGIN || '*').trim(),
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      cb(null, true);
+    } else {
+      cb(null, false);
+    }
+  },
   credentials:    true,
   methods:        ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -157,7 +168,7 @@ app.post('/api/contact', async (req, res) => {
             </table>
           </div>
           <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
-            Submitted from anicetalawfirm.vercel.app — ${new Date().toLocaleString()}
+            Submitted from gavsb.com — ${new Date().toLocaleString()}
           </div>
         </div>
       `,
