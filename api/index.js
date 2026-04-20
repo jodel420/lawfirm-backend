@@ -107,7 +107,7 @@ app.get('/api/sc-news', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     ok: true,
-    version: '3.0',
+    version: '4.0',
     env: {
       EMAIL_USER: !!process.env.EMAIL_USER,
       EMAIL_PASS: !!process.env.EMAIL_PASS,
@@ -289,7 +289,7 @@ app.post('/api/newsletter', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ADMIN AUTH
+//  ADMIN AUTH (from Supabase admins table)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 app.post('/api/admin/login', async (req, res) => {
@@ -298,23 +298,283 @@ app.post('/api/admin/login', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Username and password required' });
   }
 
-  const adminUser = process.env.ADMIN_USERNAME || 'admin';
-  if (username !== adminUser) {
-    return res.status(401).json({ success: false, message: 'Invalid credentials' });
+  try {
+    const { data: admin, error } = await supabase
+      .from('admins')
+      .select('*')
+      .eq('username', username)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error && error.message.includes('admins')) {
+      // admins table doesn't exist yet — fall back to default credentials
+      const defaultUser = process.env.ADMIN_USERNAME || 'admin';
+      const defaultPass = process.env.ADMIN_PASSWORD || 'admin123';
+      if (username === defaultUser && password === defaultPass) {
+        const token = jwt.sign(
+          { id: 'default', username: defaultUser, role: 'super_admin', type: 'admin' },
+          process.env.JWT_SECRET || 'dev-secret',
+          { expiresIn: '7d' }
+        );
+        return res.json({ success: true, token, user: { id: 'default', username: defaultUser, full_name: 'Admin', role: 'super_admin' } });
+      }
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    if (error) throw error;
+    if (!admin) {
+      return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    const valid = await bcrypt.compare(password, admin.password_hash);
+    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const token = jwt.sign(
+      { id: admin.id, username: admin.username, role: admin.role, type: 'admin' },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: '7d' }
+    );
+    res.json({ success: true, token, user: { id: admin.id, username: admin.username, full_name: admin.full_name, role: admin.role } });
+  } catch (e) {
+    console.error('Admin login error:', e.message);
+    res.status(500).json({ success: false, message: 'Login failed' });
   }
-
-  const hash = process.env.ADMIN_PASSWORD_HASH;
-  const plain = process.env.ADMIN_PASSWORD || 'admin123';
-  const valid = hash ? await bcrypt.compare(password, hash) : password === plain;
-
-  if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
-
-  const token = jwt.sign({ username }, process.env.JWT_SECRET || 'dev-secret', { expiresIn: '7d' });
-  res.json({ success: true, token });
 });
 
 app.post('/api/admin/logout', (req, res) => {
   res.json({ success: true });
+});
+
+// ── Admin: Manage admin accounts ──────────────────────────────────────────────
+
+app.get('/api/admin/admins', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('admins')
+    .select('id, username, email, full_name, role, is_active, created_at')
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, data });
+});
+
+app.post('/api/admin/admins', requireAuth, async (req, res) => {
+  try {
+    const { username, email, password, full_name, role } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Username, email, and password are required' });
+    }
+    const password_hash = await bcrypt.hash(password, 10);
+    const { data, error } = await supabase
+      .from('admins')
+      .insert({ username, email, password_hash, full_name: full_name || '', role: role || 'admin' })
+      .select('id, username, email, full_name, role, is_active, created_at')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/admins/:id', requireAuth, async (req, res) => {
+  try {
+    const updates = { ...req.body };
+    if (updates.password) {
+      updates.password_hash = await bcrypt.hash(updates.password, 10);
+      delete updates.password;
+    }
+    const { data, error } = await supabase
+      .from('admins')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select('id, username, email, full_name, role, is_active, created_at')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/admins/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase.from('admins').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  LAWYER AUTH & PERSONAL ROUTES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.post('/api/lawyer/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ success: false, message: 'Email and password required' });
+  }
+
+  try {
+    const { data: account, error } = await supabase
+      .from('lawyer_accounts')
+      .select('*, attorneys(id, name, role, image)')
+      .eq('email', email.toLowerCase().trim())
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (error) throw error;
+    if (!account) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, account.password_hash);
+    if (!valid) return res.status(401).json({ success: false, message: 'Invalid credentials' });
+
+    await supabase.from('lawyer_accounts').update({ last_login: new Date().toISOString() }).eq('id', account.id);
+
+    const token = jwt.sign(
+      { id: account.id, attorney_id: account.attorney_id, email: account.email, type: 'lawyer' },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: '7d' }
+    );
+    res.json({
+      success: true,
+      token,
+      user: { id: account.id, attorney_id: account.attorney_id, email: account.email, attorney: account.attorneys },
+    });
+  } catch (e) {
+    console.error('Lawyer login error:', e.message);
+    res.status(500).json({ success: false, message: 'Login failed' });
+  }
+});
+
+// ── Admin: Manage lawyer accounts ─────────────────────────────────────────────
+
+app.get('/api/admin/lawyer-accounts', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('lawyer_accounts')
+    .select('id, attorney_id, email, is_active, last_login, created_at, attorneys(name)')
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, data });
+});
+
+app.post('/api/admin/lawyer-accounts', requireAuth, async (req, res) => {
+  try {
+    const { attorney_id, email, password } = req.body;
+    if (!attorney_id || !email || !password) {
+      return res.status(400).json({ success: false, message: 'Attorney, email, and password are required' });
+    }
+    const password_hash = await bcrypt.hash(password, 10);
+    const { data, error } = await supabase
+      .from('lawyer_accounts')
+      .insert({ attorney_id, email: email.toLowerCase().trim(), password_hash })
+      .select('id, attorney_id, email, is_active, created_at')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/lawyer-accounts/:id', requireAuth, async (req, res) => {
+  try {
+    const updates = { ...req.body };
+    if (updates.password) {
+      updates.password_hash = await bcrypt.hash(updates.password, 10);
+      delete updates.password;
+    }
+    const { data, error } = await supabase
+      .from('lawyer_accounts')
+      .update(updates)
+      .eq('id', req.params.id)
+      .select('id, attorney_id, email, is_active, created_at')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/lawyer-accounts/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase.from('lawyer_accounts').delete().eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ── Lawyer: Personal notes/agenda/status ──────────────────────────────────────
+
+app.get('/api/lawyer/notes', requireAuth, async (req, res) => {
+  try {
+    const { category, status } = req.query;
+    let query = supabase
+      .from('lawyer_notes')
+      .select('*')
+      .eq('attorney_id', req.user.attorney_id)
+      .order('created_at', { ascending: false });
+
+    if (category) query = query.eq('category', category);
+    if (status) query = query.eq('status', status);
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/lawyer/notes', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('lawyer_notes')
+      .insert({ ...req.body, attorney_id: req.user.attorney_id })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/lawyer/notes/:id', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('lawyer_notes')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .eq('attorney_id', req.user.attorney_id)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/lawyer/notes/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase
+    .from('lawyer_notes')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('attorney_id', req.user.attorney_id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ── Lawyer: View own profile ──────────────────────────────────────────────────
+
+app.get('/api/lawyer/profile', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('attorneys')
+      .select('*')
+      .eq('id', req.user.attorney_id)
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
