@@ -129,7 +129,7 @@ function getTransporter() {
 }
 
 app.post('/api/contact', async (req, res) => {
-  const { firstName, lastName, email, preferredLawyer, notes } = req.body;
+  const { firstName, lastName, email, phone, preferredLawyer, notes } = req.body;
 
   if (!firstName || !email) {
     return res.status(400).json({ success: false, message: 'First name and email are required.' });
@@ -153,6 +153,7 @@ app.post('/api/contact', async (req, res) => {
             <table style="width:100%;border-collapse:collapse;font-size:14px;">
               <tr><td style="padding:8px 0;color:#6b7280;width:140px;">Name</td><td style="padding:8px 0;color:#1a2638;font-weight:600;">${firstName} ${lastName || ''}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;">Email</td><td style="padding:8px 0;color:#1a2638;"><a href="mailto:${email}" style="color:#c9a84c;">${email}</a></td></tr>
+              ${phone ? `<tr><td style="padding:8px 0;color:#6b7280;">Phone</td><td style="padding:8px 0;color:#1a2638;"><a href="tel:${phone}" style="color:#c9a84c;">${phone}</a></td></tr>` : ''}
               <tr><td style="padding:8px 0;color:#6b7280;">Preferred Lawyer</td><td style="padding:8px 0;color:#1a2638;">${preferredLawyer || 'Not specified'}</td></tr>
               ${notes ? `<tr><td style="padding:8px 0;color:#6b7280;vertical-align:top;">Concern / Notes</td><td style="padding:8px 0;color:#1a2638;white-space:pre-wrap;">${notes}</td></tr>` : ''}
             </table>
