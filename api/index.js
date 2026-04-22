@@ -708,6 +708,61 @@ app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  ADMIN: HEARINGS (Consolidated Attorney Calendar)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/admin/hearings', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('hearings')
+    .select('*, attorneys(id, name, role)')
+    .order('hearing_date', { ascending: true })
+    .order('hearing_time', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, data });
+});
+
+app.post('/api/admin/hearings', requireAuth, async (req, res) => {
+  try {
+    const { attorneys: _atty, ...payload } = req.body;
+    const { data, error } = await supabase
+      .from('hearings')
+      .insert(payload)
+      .select('*, attorneys(id, name, role)')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/hearings/:id', requireAuth, async (req, res) => {
+  try {
+    const { attorneys: _atty, id: _id, created_at: _ca, ...payload } = req.body;
+    const { data, error } = await supabase
+      .from('hearings')
+      .update(payload)
+      .eq('id', req.params.id)
+      .select('*, attorneys(id, name, role)')
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/hearings/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase
+    .from('hearings')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  ADMIN: PRACTICE AREAS
 // ═══════════════════════════════════════════════════════════════════════════════
 
