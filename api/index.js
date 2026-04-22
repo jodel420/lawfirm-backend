@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('dotenv').config({ path: '.env.local', override: true });
 
 const express    = require('express');
 const cors       = require('cors');
@@ -711,31 +712,128 @@ app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
 //  ADMIN: HEARINGS (Consolidated Attorney Calendar)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// ── Email helper ─────────────────────────────────────────────────────────────
+async function sendHearingEmail(hearing, attorney, { subject, intro, tag }) {
+  const user = (process.env.EMAIL_USER || '').trim();
+  const pass = (process.env.EMAIL_PASS || '').trim();
+  if (!user || !pass) return { sent: false, reason: 'EMAIL_USER / EMAIL_PASS not configured' };
+  if (!attorney || !attorney.email) return { sent: false, reason: 'Attorney has no email address on file' };
+
+  try {
+    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+
+    const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-PH', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
+    const fmtTime = (t) => {
+      if (!t) return '—';
+      const [h, m] = t.split(':');
+      const hr = parseInt(h, 10);
+      return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+    };
+
+    const statusColors = { Scheduled: '#1d4ed8', Reset: '#92400e', Done: '#15803d', Cancelled: '#dc2626' };
+    const statusBg     = { Scheduled: '#dbeafe', Reset: '#fef3c7', Done: '#dcfce7', Cancelled: '#fee2e2' };
+
+    await transporter.sendMail({
+      from: `"Aniceta Law Firm" <${user}>`,
+      to: attorney.email,
+      subject,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:580px;margin:0 auto;border:1px solid #e5e5e5;border-radius:8px;overflow:hidden;">
+          <div style="background:#1a2638;padding:24px 28px;display:flex;align-items:center;gap:12px;">
+            <div>
+              <h2 style="color:#c9a84c;margin:0;font-size:18px;letter-spacing:1.5px;">ANICETA</h2>
+              <p style="color:rgba(255,255,255,0.5);margin:3px 0 0;font-size:11px;letter-spacing:2px;text-transform:uppercase;">Law Firm — Hearing Notice</p>
+            </div>
+          </div>
+          <div style="padding:28px;">
+            <p style="font-size:15px;color:#1a2638;margin:0 0 6px;">Dear <strong>${attorney.name}</strong>,</p>
+            <p style="font-size:14px;color:#6b7280;margin:0 0 24px;line-height:1.6;">${intro}</p>
+
+            <div style="background:#f8fafc;border-left:4px solid #c9a84c;border-radius:0 6px 6px 0;padding:20px 24px;margin-bottom:24px;">
+              <table style="width:100%;border-collapse:collapse;font-size:14px;">
+                <tr>
+                  <td style="padding:7px 0;color:#9ca3af;width:140px;vertical-align:top;">Case</td>
+                  <td style="padding:7px 0;color:#1a2638;font-weight:700;">${hearing.case_title}</td>
+                </tr>
+                ${hearing.case_number ? `<tr><td style="padding:7px 0;color:#9ca3af;">Case No.</td><td style="padding:7px 0;color:#1a2638;">${hearing.case_number}</td></tr>` : ''}
+                <tr>
+                  <td style="padding:7px 0;color:#9ca3af;">Date</td>
+                  <td style="padding:7px 0;color:#1a2638;font-weight:600;">${fmt(hearing.hearing_date)}</td>
+                </tr>
+                ${hearing.hearing_time ? `<tr><td style="padding:7px 0;color:#9ca3af;">Time</td><td style="padding:7px 0;color:#1a2638;">${fmtTime(hearing.hearing_time)}</td></tr>` : ''}
+                ${hearing.court ? `<tr><td style="padding:7px 0;color:#9ca3af;">Court</td><td style="padding:7px 0;color:#1a2638;">${hearing.court}</td></tr>` : ''}
+                <tr>
+                  <td style="padding:7px 0;color:#9ca3af;">Type</td>
+                  <td style="padding:7px 0;color:#1a2638;">${hearing.hearing_type}</td>
+                </tr>
+                <tr>
+                  <td style="padding:7px 0;color:#9ca3af;">Status</td>
+                  <td style="padding:7px 0;">
+                    <span style="display:inline-block;padding:2px 10px;background:${statusBg[hearing.status] || '#e5e7eb'};color:${statusColors[hearing.status] || '#374151'};border-radius:4px;font-size:12px;font-weight:700;">
+                      ${hearing.status}
+                    </span>
+                  </td>
+                </tr>
+                ${hearing.notes ? `<tr><td style="padding:7px 0;color:#9ca3af;vertical-align:top;">Notes</td><td style="padding:7px 0;color:#6b7280;font-style:italic;">${hearing.notes}</td></tr>` : ''}
+              </table>
+            </div>
+
+            <p style="font-size:13px;color:#9ca3af;margin:0;">
+              This is an automated notice from the Aniceta Law Firm admin system.<br/>
+              If you believe this was sent in error, please contact the admin.
+            </p>
+          </div>
+          <div style="background:#f5f2ed;padding:14px 28px;font-size:11px;color:#9ca3af;display:flex;justify-content:space-between;">
+            <span>© ${new Date().getFullYear()} Aniceta Law Firm</span>
+            <span>${tag} — ${new Date().toLocaleString('en-PH')}</span>
+          </div>
+        </div>
+      `,
+    });
+    return { sent: true, to: attorney.email };
+  } catch (e) {
+    console.error('Hearing email error:', e.message);
+    return { sent: false, reason: e.message };
+  }
+}
+
+// ── GET all hearings ──────────────────────────────────────────────────────────
 app.get('/api/admin/hearings', requireAuth, async (req, res) => {
   const { data, error } = await supabase
     .from('hearings')
-    .select('*, attorneys(id, name, role)')
+    .select('*, attorneys(id, name, role, email)')
     .order('hearing_date', { ascending: true })
     .order('hearing_time', { ascending: true });
   if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true, data });
 });
 
+// ── POST create hearing + notify attorney ─────────────────────────────────────
 app.post('/api/admin/hearings', requireAuth, async (req, res) => {
   try {
     const { attorneys: _atty, ...payload } = req.body;
     const { data, error } = await supabase
       .from('hearings')
       .insert(payload)
-      .select('*, attorneys(id, name, role)')
+      .select('*, attorneys(id, name, role, email)')
       .single();
     if (error) throw error;
-    res.json({ success: true, data });
+
+    const emailResult = await sendHearingEmail(data, data.attorneys, {
+      subject: `Hearing Scheduled — ${data.case_title}`,
+      intro: `A hearing has been scheduled for you. Please review the details below and make the necessary preparations.`,
+      tag: 'Hearing Created',
+    });
+
+    res.json({ success: true, data, emailSent: emailResult.sent, emailNote: emailResult.reason || emailResult.to });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
 });
 
+// ── PUT update hearing + notify attorney ──────────────────────────────────────
 app.put('/api/admin/hearings/:id', requireAuth, async (req, res) => {
   try {
     const { attorneys: _atty, id: _id, created_at: _ca, ...payload } = req.body;
@@ -743,16 +841,24 @@ app.put('/api/admin/hearings/:id', requireAuth, async (req, res) => {
       .from('hearings')
       .update(payload)
       .eq('id', req.params.id)
-      .select('*, attorneys(id, name, role)')
+      .select('*, attorneys(id, name, role, email)')
       .single();
     if (error) throw error;
     if (!data) return res.status(404).json({ success: false, message: 'Not found' });
-    res.json({ success: true, data });
+
+    const emailResult = await sendHearingEmail(data, data.attorneys, {
+      subject: `Hearing Updated — ${data.case_title}`,
+      intro: `The details of your hearing have been updated. Please review the latest information below.`,
+      tag: 'Hearing Updated',
+    });
+
+    res.json({ success: true, data, emailSent: emailResult.sent, emailNote: emailResult.reason || emailResult.to });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
 });
 
+// ── DELETE hearing ────────────────────────────────────────────────────────────
 app.delete('/api/admin/hearings/:id', requireAuth, async (req, res) => {
   const { error } = await supabase
     .from('hearings')
@@ -760,6 +866,49 @@ app.delete('/api/admin/hearings/:id', requireAuth, async (req, res) => {
     .eq('id', req.params.id);
   if (error) return res.status(500).json({ success: false, message: error.message });
   res.json({ success: true });
+});
+
+// ── POST send tomorrow's reminders ───────────────────────────────────────────
+app.post('/api/admin/hearings/send-reminders', requireAuth, async (req, res) => {
+  try {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    const { data: hearings, error } = await supabase
+      .from('hearings')
+      .select('*, attorneys(id, name, role, email)')
+      .eq('hearing_date', tomorrowStr)
+      .eq('status', 'Scheduled');
+
+    if (error) throw error;
+    if (!hearings || hearings.length === 0) {
+      return res.json({ success: true, sent: 0, message: 'No scheduled hearings for tomorrow.' });
+    }
+
+    const results = await Promise.all(
+      hearings.map(h =>
+        sendHearingEmail(h, h.attorneys, {
+          subject: `⏰ Reminder: Hearing Tomorrow — ${h.case_title}`,
+          intro: `This is a reminder that you have a court hearing <strong>tomorrow</strong>. Please ensure you are fully prepared and have all required documents ready.`,
+          tag: 'Day-Before Reminder',
+        })
+      )
+    );
+
+    const sent  = results.filter(r => r.sent).length;
+    const fails = results.filter(r => !r.sent).length;
+
+    res.json({
+      success: true,
+      total: hearings.length,
+      sent,
+      failed: fails,
+      message: `Reminders sent: ${sent} of ${hearings.length} attorneys notified for ${tomorrowStr}.`,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
