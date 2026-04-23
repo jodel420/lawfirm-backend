@@ -1,5 +1,4 @@
 require('dotenv').config();
-require('dotenv').config({ path: '.env.local', override: true });
 
 const express    = require('express');
 const cors       = require('cors');
@@ -130,10 +129,10 @@ function getTransporter() {
 }
 
 app.post('/api/contact', async (req, res) => {
-  const { firstName, lastName, email, phone, preferredLawyer, notes } = req.body;
+  const { fullName, email, phone, preferredLawyer, notes } = req.body;
 
-  if (!firstName || !email) {
-    return res.status(400).json({ success: false, message: 'First name and email are required.' });
+  if (!fullName || !email) {
+    return res.status(400).json({ success: false, message: 'Full name and email are required.' });
   }
 
   try {
@@ -143,7 +142,7 @@ app.post('/api/contact', async (req, res) => {
     await transporter.sendMail({
       from: `"Aniceta Website" <${fromUser}>`,
       to: (process.env.NOTIFY_EMAIL || fromUser).trim(),
-      subject: `New Consultation Request — ${firstName} ${lastName || ''}`.trim(),
+      subject: `New Consultation Request — ${fullName}`,
       html: `
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
           <div style="background:#1a2638;padding:24px 28px;">
@@ -152,7 +151,7 @@ app.post('/api/contact', async (req, res) => {
           </div>
           <div style="padding:28px;">
             <table style="width:100%;border-collapse:collapse;font-size:14px;">
-              <tr><td style="padding:8px 0;color:#6b7280;width:140px;">Name</td><td style="padding:8px 0;color:#1a2638;font-weight:600;">${firstName} ${lastName || ''}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;width:140px;">Name</td><td style="padding:8px 0;color:#1a2638;font-weight:600;">${fullName}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;">Email</td><td style="padding:8px 0;color:#1a2638;"><a href="mailto:${email}" style="color:#c9a84c;">${email}</a></td></tr>
               ${phone ? `<tr><td style="padding:8px 0;color:#6b7280;">Phone</td><td style="padding:8px 0;color:#1a2638;"><a href="tel:${phone}" style="color:#c9a84c;">${phone}</a></td></tr>` : ''}
               <tr><td style="padding:8px 0;color:#6b7280;">Preferred Lawyer</td><td style="padding:8px 0;color:#1a2638;">${preferredLawyer || 'Not specified'}</td></tr>
@@ -178,7 +177,7 @@ app.post('/api/contact', async (req, res) => {
             <p style="color:rgba(255,255,255,0.6);margin:4px 0 0;font-size:12px;">Law Firm</p>
           </div>
           <div style="padding:28px;">
-            <p style="color:#1a2638;font-size:15px;">Dear ${firstName},</p>
+            <p style="color:#1a2638;font-size:15px;">Dear ${fullName},</p>
             <p style="color:#6b7280;font-size:14px;line-height:1.7;">
               Thank you for reaching out to Aniceta. We have received your consultation request
               and one of our attorneys will contact you within <strong style="color:#1a2638;">24 hours</strong>.
@@ -198,7 +197,7 @@ app.post('/api/contact', async (req, res) => {
 
     res.json({
       success: true,
-      message: `Thank you, ${firstName}! We've received your request and will contact you within 24 hours. Please check your email for a confirmation.`,
+      message: `Thank you, ${fullName}! We've received your request and will contact you within 24 hours. Please check your email for a confirmation.`,
     });
   } catch (err) {
     console.error('Contact email error:', err.message, '| code:', err.code, '| responseCode:', err.responseCode);
@@ -712,6 +711,7 @@ app.delete('/api/admin/attorneys/:id', requireAuth, async (req, res) => {
 //  ADMIN: HEARINGS (Consolidated Attorney Calendar)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+
 // ── Email helper ─────────────────────────────────────────────────────────────
 async function sendHearingEmail(hearing, attorney, { subject, intro, tag }) {
   const user = (process.env.EMAIL_USER || '').trim();
@@ -1053,6 +1053,249 @@ app.put('/api/admin/posts/:id', requireAuth, async (req, res) => {
 app.delete('/api/admin/posts/:id', requireAuth, async (req, res) => {
   const { error } = await supabase
     .from('posts')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC: SITE SETTINGS (non-sensitive keys only)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const PUBLIC_SETTING_KEYS = ['facebook_url', 'instagram_url', 'linkedin_url', 'twitter_url', 'og_image'];
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('key, value')
+      .in('key', PUBLIC_SETTING_KEYS);
+    if (error) throw error;
+    const result = {};
+    (data || []).forEach(({ key, value }) => { result[key] = value; });
+    res.json({ success: true, data: result });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC: TESTIMONIALS & REVIEW SUBMISSION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/testimonials', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('testimonials')
+      .select('id, name, role, avatar, text, verified, rating, created_at')
+      .eq('status', 'approved')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ── OTP helpers ──────────────────────────────────────────────────────────────
+const REVIEW_JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+
+function hashOtp(code) {
+  return crypto.createHash('sha256').update(String(code)).digest('hex');
+}
+
+function makeSessionToken(payload) {
+  return jwt.sign({ ...payload, purpose: 'review-session', verified: true }, REVIEW_JWT_SECRET, { expiresIn: '2h' });
+}
+
+function verifySession(token) {
+  try {
+    const p = jwt.verify(token, REVIEW_JWT_SECRET);
+    if (p.purpose !== 'review-session' || !p.verified) return null;
+    return p;
+  } catch { return null; }
+}
+
+// ── POST /api/reviews/send-otp ────────────────────────────────────────────────
+app.post('/api/reviews/send-otp', async (req, res) => {
+  const { email } = req.body;
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ success: false, message: 'A valid email address is required.' });
+  }
+
+  const otp  = String(Math.floor(100000 + Math.random() * 900000));
+  const otpToken = jwt.sign({ email, otpHash: hashOtp(otp), purpose: 'review-otp' }, REVIEW_JWT_SECRET, { expiresIn: '15m' });
+
+  try {
+    const transporter = getTransporter();
+    const from = (process.env.EMAIL_USER || '').trim();
+    await transporter.sendMail({
+      from: `"Aniceta Law Firm" <${from}>`,
+      to: email,
+      subject: `${otp} is your Aniceta review verification code`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
+          <div style="background:#1a2638;padding:24px 28px;">
+            <h2 style="color:#c9a84c;margin:0;font-size:18px;letter-spacing:1px;">ANICETA</h2>
+            <p style="color:rgba(255,255,255,0.6);margin:4px 0 0;font-size:12px;">Email Verification</p>
+          </div>
+          <div style="padding:28px;">
+            <p style="color:#374151;font-size:14px;margin:0 0 20px;">Use the code below to verify your email and submit your review:</p>
+            <div style="background:#f5f2ed;border-radius:8px;padding:20px;text-align:center;margin-bottom:20px;">
+              <span style="font-size:36px;font-weight:700;letter-spacing:10px;color:#1a2638;">${otp}</span>
+            </div>
+            <p style="color:#9ca3af;font-size:12px;margin:0;">This code expires in <strong>15 minutes</strong>. Do not share it with anyone.</p>
+          </div>
+          <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
+            Sent from gavsb.com — ${new Date().toLocaleString()}
+          </div>
+        </div>
+      `,
+    });
+    res.json({ success: true, otpToken });
+  } catch (e) {
+    console.error('OTP email error:', e.message);
+    res.status(500).json({ success: false, message: 'Could not send verification email. Please try again.' });
+  }
+});
+
+// ── POST /api/reviews/verify-otp ─────────────────────────────────────────────
+app.post('/api/reviews/verify-otp', (req, res) => {
+  const { otpToken, code } = req.body;
+  if (!otpToken || !code) {
+    return res.status(400).json({ success: false, message: 'Token and code are required.' });
+  }
+  try {
+    const payload = jwt.verify(otpToken, REVIEW_JWT_SECRET);
+    if (payload.purpose !== 'review-otp') throw new Error('wrong purpose');
+    if (hashOtp(code.trim()) !== payload.otpHash) {
+      return res.status(400).json({ success: false, message: 'Incorrect code. Please try again.' });
+    }
+    const sessionToken = makeSessionToken({ email: payload.email, provider: 'email' });
+    res.json({ success: true, email: payload.email, sessionToken });
+  } catch (e) {
+    if (e.name === 'TokenExpiredError') {
+      return res.status(400).json({ success: false, message: 'This code has expired. Please request a new one.' });
+    }
+    res.status(400).json({ success: false, message: 'Invalid code. Please request a new one.' });
+  }
+});
+
+// ── POST /api/reviews/verify-google ──────────────────────────────────────────
+app.post('/api/reviews/verify-google', async (req, res) => {
+  const { credential } = req.body;
+  if (!credential) return res.status(400).json({ success: false, message: 'Missing Google credential.' });
+  try {
+    const { data: gUser } = await axios.get(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${credential}`,
+      { timeout: 8000 }
+    );
+    if (!gUser.email || String(gUser.email_verified) !== 'true') {
+      return res.status(400).json({ success: false, message: 'Google could not verify your email.' });
+    }
+    const sessionToken = makeSessionToken({
+      email: gUser.email, name: gUser.name, picture: gUser.picture, provider: 'google',
+    });
+    res.json({ success: true, email: gUser.email, name: gUser.name, picture: gUser.picture, sessionToken });
+  } catch (e) {
+    console.error('Google verify error:', e.message);
+    res.status(400).json({ success: false, message: 'Could not verify your Google account. Please try again.' });
+  }
+});
+
+// ── POST /api/reviews ─────────────────────────────────────────────────────────
+app.post('/api/reviews', async (req, res) => {
+  try {
+    const { name, role, text, rating, sessionToken } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Name is required.' });
+    if (!text || !text.trim()) return res.status(400).json({ success: false, message: 'Review text is required.' });
+    if (!sessionToken)         return res.status(401).json({ success: false, message: 'Please verify your identity before submitting.' });
+
+    const session = verifySession(sessionToken);
+    if (!session) return res.status(401).json({ success: false, message: 'Your session has expired. Please verify again.' });
+
+    const stars = Math.min(5, Math.max(1, parseInt(rating, 10) || 5));
+
+    const { data, error } = await supabase
+      .from('testimonials')
+      .insert({
+        name:           name.trim(),
+        role:           (role || '').trim(),
+        text:           text.trim(),
+        avatar:         session.picture || '',
+        status:         'pending',
+        source:         'public',
+        reviewer_email: session.email,
+        verified:       true,
+        rating:         stars,
+      })
+      .select('id')
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ADMIN: TESTIMONIALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/admin/testimonials', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('testimonials')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    res.json({ success: true, data: data || [] });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+app.post('/api/admin/testimonials', requireAuth, async (req, res) => {
+  try {
+    const { name, role, text, avatar } = req.body;
+    if (!name || !text) {
+      return res.status(400).json({ success: false, message: 'Name and text are required.' });
+    }
+    const { data, error } = await supabase
+      .from('testimonials')
+      .insert({ name, role: role || '', text, avatar: avatar || '', status: 'approved', source: 'admin' })
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/testimonials/:id', requireAuth, async (req, res) => {
+  try {
+    const allowed = ['name', 'role', 'avatar', 'text', 'status'];
+    const payload = {};
+    allowed.forEach(k => { if (req.body[k] !== undefined) payload[k] = req.body[k]; });
+    const { data, error } = await supabase
+      .from('testimonials')
+      .update(payload)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/testimonials/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase
+    .from('testimonials')
     .delete()
     .eq('id', req.params.id);
   if (error) return res.status(500).json({ success: false, message: error.message });
