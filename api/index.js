@@ -159,7 +159,7 @@ app.post('/api/contact', async (req, res) => {
             </table>
           </div>
           <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
-            Submitted from gavsb.com — ${new Date().toLocaleString()}
+            Submitted from gavsbq.com — ${new Date().toLocaleString()}
           </div>
         </div>
       `,
@@ -1148,7 +1148,7 @@ app.post('/api/reviews/send-otp', async (req, res) => {
             <p style="color:#9ca3af;font-size:12px;margin:0;">This code expires in <strong>15 minutes</strong>. Do not share it with anyone.</p>
           </div>
           <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
-            Sent from gavsb.com — ${new Date().toLocaleString()}
+            Sent from gavsbq.com — ${new Date().toLocaleString()}
           </div>
         </div>
       `,
