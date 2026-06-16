@@ -9,6 +9,11 @@ const nodemailer = require('nodemailer');
 const axios      = require('axios');
 const cheerio    = require('cheerio');
 const crypto     = require('crypto');
+const https      = require('https');
+
+// SC Judiciary has a broken SSL certificate chain — this agent skips verification
+// only for requests that explicitly pass it (i.e. the RSS fetch below).
+const scJudiciaryAgent = new https.Agent({ rejectUnauthorized: false });
 
 const supabase   = require('../lib/db');
 const requireAuth = require('../lib/auth');
@@ -54,6 +59,7 @@ app.get('/api/sc-news', async (req, res) => {
       'https://sc.judiciary.gov.ph/feed/',
       {
         timeout: 20000,
+        httpsAgent: scJudiciaryAgent,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
           'Accept': 'application/rss+xml, application/xml, text/xml, */*',
