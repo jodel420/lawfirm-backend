@@ -124,12 +124,35 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// ── Email domain validator (MX lookup) ───────────────────────────────────────
+const dns = require('dns').promises;
+async function emailDomainIsValid(email) {
+  try {
+    const domain = email.split('@')[1];
+    if (!domain) return false;
+    const records = await dns.resolveMx(domain);
+    return records && records.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ── Contact form (email only — no DB) ────────────────────────────────────────
 function getTransporter() {
   const user = (process.env.EMAIL_USER || '').trim();
   const pass = (process.env.EMAIL_PASS || '').trim();
+  const host = (process.env.SMTP_HOST || '').trim();
+  const port = parseInt(process.env.SMTP_PORT || '465', 10);
   if (!user || !pass) {
     throw new Error(`Email credentials missing – EMAIL_USER=${user ? 'set' : 'EMPTY'}, EMAIL_PASS=${pass ? 'set' : 'EMPTY'}`);
+  }
+  if (host) {
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
   }
   return nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
 }
@@ -171,7 +194,16 @@ app.post('/api/contact', async (req, res) => {
       `,
     });
 
-    // Confirmation to the client
+    // Confirmation to the client — only if their email domain actually exists
+    const clientDomainOk = await emailDomainIsValid(email);
+    if (!clientDomainOk) {
+      console.warn(`Skipping client confirmation — invalid email domain: ${email}`);
+      return res.json({
+        success: true,
+        message: `Thank you, ${fullName}! We've received your request and will contact you within 24 hours.`,
+      });
+    }
+
     await transporter.sendMail({
       from: `"Aniceta Law Firm" <${fromUser}>`,
       to: email,
@@ -726,7 +758,11 @@ async function sendHearingEmail(hearing, attorney, { subject, intro, tag }) {
   if (!attorney || !attorney.email) return { sent: false, reason: 'Attorney has no email address on file' };
 
   try {
-    const transporter = nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
+    const smtpHost = (process.env.SMTP_HOST || '').trim();
+    const smtpPort = parseInt(process.env.SMTP_PORT || '465', 10);
+    const transporter = smtpHost
+      ? nodemailer.createTransport({ host: smtpHost, port: smtpPort, secure: smtpPort === 465, auth: { user, pass } })
+      : nodemailer.createTransport({ service: 'gmail', auth: { user, pass } });
 
     const fmt = (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-PH', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
