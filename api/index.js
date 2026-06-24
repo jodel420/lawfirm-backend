@@ -167,12 +167,29 @@ app.post('/api/contact', async (req, res) => {
   try {
     const transporter = getTransporter();
     const fromUser = (process.env.EMAIL_USER || '').trim();
+    const adminEmail = (process.env.NOTIFY_EMAIL || fromUser).trim();
 
-    await transporter.sendMail({
-      from: `"Aniceta Website" <${fromUser}>`,
-      to: (process.env.NOTIFY_EMAIL || fromUser).trim(),
-      subject: `New Consultation Request — ${fullName}`,
-      html: `
+    // Look up the preferred lawyer's email from the attorneys table
+    let lawyerEmail = null;
+    if (preferredLawyer && preferredLawyer !== 'Not specified') {
+      const { data: lawyerData } = await supabase
+        .from('attorneys')
+        .select('email, name')
+        .ilike('name', `%${preferredLawyer}%`)
+        .limit(1)
+        .single();
+      if (lawyerData && lawyerData.email) {
+        lawyerEmail = lawyerData.email.trim();
+      }
+    }
+
+    // Build recipient list: always notify admin, also notify the lawyer if found
+    const notifyRecipients = [adminEmail];
+    if (lawyerEmail && lawyerEmail !== adminEmail) {
+      notifyRecipients.push(lawyerEmail);
+    }
+
+    const notificationHtml = `
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;border:1px solid #e5e5e5;border-radius:6px;overflow:hidden;">
           <div style="background:#1a2638;padding:24px 28px;">
             <h2 style="color:#c9a84c;margin:0;font-size:18px;letter-spacing:1px;">ANICETA</h2>
@@ -191,7 +208,13 @@ app.post('/api/contact', async (req, res) => {
             Submitted from gavsbq.com — ${new Date().toLocaleString()}
           </div>
         </div>
-      `,
+      `;
+
+    await transporter.sendMail({
+      from: `"Aniceta Website" <${fromUser}>`,
+      to: notifyRecipients.join(', '),
+      subject: `New Consultation Request — ${fullName}`,
+      html: notificationHtml,
     });
 
     // Confirmation to the client — only if their email domain actually exists
