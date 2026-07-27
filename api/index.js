@@ -1029,6 +1029,75 @@ app.delete('/api/admin/practice-areas/:id', requireAuth, async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
+//  PUBLIC: ACCOUNTING SERVICES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/accounting-services', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounting_services')
+      .select('*')
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  ADMIN: ACCOUNTING SERVICES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.get('/api/admin/accounting-services', requireAuth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('accounting_services')
+    .select('*')
+    .order('created_at', { ascending: true });
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true, data });
+});
+
+app.post('/api/admin/accounting-services', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounting_services')
+      .insert(req.body)
+      .select()
+      .single();
+    if (error) throw error;
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.put('/api/admin/accounting-services/:id', requireAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('accounting_services')
+      .update(req.body)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (error) throw error;
+    if (!data) return res.status(404).json({ success: false, message: 'Not found' });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+});
+
+app.delete('/api/admin/accounting-services/:id', requireAuth, async (req, res) => {
+  const { error } = await supabase
+    .from('accounting_services')
+    .delete()
+    .eq('id', req.params.id);
+  if (error) return res.status(500).json({ success: false, message: error.message });
+  res.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
 //  ADMIN: ABOUT
 // ═══════════════════════════════════════════════════════════════════════════════
 

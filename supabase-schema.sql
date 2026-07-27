@@ -23,7 +23,7 @@ create table if not exists practice_areas (
   id         uuid primary key default gen_random_uuid(),
   icon       text default 'FaGavel',
   title      text not null,
-  "desc"     text default '',
+  description     text default '',
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
