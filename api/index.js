@@ -52,6 +52,24 @@ app.use(cors({
 app.options('*', cors());
 app.use(express.json());
 
+// ── SEO: never index the API domain ───────────────────────────────────────────
+app.use((req, res, next) => {
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+  next();
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    service: 'BGV-ASQ Law Offices API',
+    status: 'ok',
+  });
+});
+
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain').send('User-agent: *\nDisallow: /\n');
+});
+
 // ── SC Judiciary RSS feed (no DB needed) ─────────────────────────────────────
 app.get('/api/sc-news', async (req, res) => {
   try {
