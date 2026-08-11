@@ -70,6 +70,15 @@ app.get('/robots.txt', (req, res) => {
   res.type('text/plain').send('User-agent: *\nDisallow: /\n');
 });
 
+// ── Cache helper for public read-only endpoints ───────────────────────────────
+// maxAge in seconds; staleWhileRevalidate adds an extra SWR window.
+function setCache(res, maxAge = 300, staleWhileRevalidate = 600) {
+  res.setHeader(
+    'Cache-Control',
+    `public, max-age=${maxAge}, stale-while-revalidate=${staleWhileRevalidate}`
+  );
+}
+
 // ── SC Judiciary RSS feed (no DB needed) ─────────────────────────────────────
 app.get('/api/sc-news', async (req, res) => {
   try {
@@ -116,6 +125,7 @@ app.get('/api/sc-news', async (req, res) => {
     if (!articles.length) {
       return res.json({ success: false, data: [], message: 'No articles found' });
     }
+    setCache(res, 3600, 7200); // SC news — cache 1 hour
     res.json({ success: true, data: articles });
   } catch (e) {
     console.error('SC news feed error:', e.code || e.message, e.response?.status);
@@ -223,7 +233,7 @@ app.post('/api/contact', async (req, res) => {
             </table>
           </div>
           <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
-            Submitted from gavsbq.com — ${new Date().toLocaleString()}
+            Submitted from bgv-asq.com — ${new Date().toLocaleString()}
           </div>
         </div>
       `;
@@ -298,6 +308,7 @@ app.get('/api/attorneys', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: true });
     if (error) throw error;
+    setCache(res, 300, 600);
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -311,6 +322,7 @@ app.get('/api/practice-areas', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: true });
     if (error) throw error;
+    setCache(res, 300, 600);
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -325,6 +337,7 @@ app.get('/api/about', async (req, res) => {
       .limit(1)
       .maybeSingle();
     if (error) throw error;
+    setCache(res, 86400, 172800); // about content rarely changes — cache 1 day
     res.json({ success: true, data: data || DEFAULT_ABOUT });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -338,6 +351,7 @@ app.get('/api/posts', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
+    setCache(res, 300, 600);
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -1057,6 +1071,7 @@ app.get('/api/accounting-services', async (req, res) => {
       .select('*')
       .order('created_at', { ascending: true });
     if (error) throw error;
+    setCache(res, 300, 600);
     res.json({ success: true, data });
   } catch (e) {
     res.status(500).json({ success: false, message: e.message });
@@ -1300,7 +1315,7 @@ app.post('/api/reviews/send-otp', async (req, res) => {
             <p style="color:#9ca3af;font-size:12px;margin:0;">This code expires in <strong>15 minutes</strong>. Do not share it with anyone.</p>
           </div>
           <div style="background:#f5f2ed;padding:16px 28px;font-size:12px;color:#9ca3af;">
-            Sent from gavsbq.com — ${new Date().toLocaleString()}
+            Sent from bgv-asq.com — ${new Date().toLocaleString()}
           </div>
         </div>
       `,
@@ -1465,6 +1480,14 @@ const DEFAULT_ABOUT = {
   paragraph2: "We're one of the leading law firms in Cebu. With a solid reputation built on years of successful cases and satisfied clients, our firm has established itself as a trusted name in the legal industry.",
   bullets:    ['Client-Centered Approach', 'Commitment to Communication', 'Strong Negotiation Skills', 'Trial-Ready Representation'],
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  404 CATCH-ALL  (must be last — after all routes)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: 'Not found' });
+});
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  LOCAL DEV SERVER (not used by Vercel)

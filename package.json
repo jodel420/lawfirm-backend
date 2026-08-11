@@ -4,7 +4,7 @@
   "description": "Aniceta Law Firm – Express/Supabase API",
   "main": "api/index.js",
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "node --watch server.js",
